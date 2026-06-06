@@ -68,25 +68,13 @@ class BotGUIManager(ctk.CTk):
         self.lbl_state = ctk.CTkLabel(self.status_frame, text="Engine Status: IDLE / DISCONNECTED", font=("Segoe UI", 14, "bold"), text_color="#E0E1DD")
         self.lbl_state.pack(pady=12)
 
-        # ============ NEW: ADAPTIVE METRICS PANEL ============
         self.analytics_frame = ctk.CTkFrame(self, border_width=2, border_color="#27AE60", fg_color="#1A1A1A")
         self.analytics_frame.pack(pady=5, fill="x", padx=30)
 
-        self.lbl_analytics_title = ctk.CTkLabel(
-            self.analytics_frame, 
-            text="📊 Adaptive Metrics", 
-            font=("Segoe UI", 12, "bold"), 
-            text_color="#27AE60"
-        )
+        self.lbl_analytics_title = ctk.CTkLabel(self.analytics_frame, text="📊 Adaptive Metrics", font=("Segoe UI", 12, "bold"), text_color="#27AE60")
         self.lbl_analytics_title.pack(pady=5)
 
-        self.lbl_metrics = ctk.CTkLabel(
-            self.analytics_frame,
-            text="Efficiency: 0% | Merge: 0% | Summon: 0%",
-            font=("Segoe UI", 10),
-            text_color="#E0E1DD",
-            justify="left"
-        )
+        self.lbl_metrics = ctk.CTkLabel(self.analytics_frame, text="Efficiency: 0% | Merge: 0% | Summon: 0%", font=("Segoe UI", 10), text_color="#E0E1DD", justify="left")
         self.lbl_metrics.pack(pady=5)
 
         self.log_label = ctk.CTkLabel(self, text="Real-time Execution Telemetry Output:", font=("Segoe UI", 11, "italic"), text_color="#8D99AE")
@@ -139,7 +127,8 @@ class BotGUIManager(ctk.CTk):
             self.write_log(f"[ERROR] {str(e)}")
 
     def action_start_scraping(self):
-        if self.bot_running: return
+        if self.bot_running:
+            return
         self.btn_scrape.configure(state="disabled", text="TOPLANIYOR...")
         def run():
             try:
@@ -152,7 +141,7 @@ class BotGUIManager(ctk.CTk):
 
     def action_manual_restart(self):
         try:
-            self.recovery.handle_recovery(2) 
+            self.recovery.handle_recovery(2)
             self.write_log("[TEST] Restart tetiklendi.")
         except Exception as e:
             self.write_log(f"[ERROR] {str(e)}")
@@ -169,7 +158,6 @@ class BotGUIManager(ctk.CTk):
                     time.sleep(1.0)
                     continue
 
-                # ============ METRICS UPDATE ============
                 if time.time() - self.last_metrics_update > 5.0:
                     self.after(0, self.update_metrics_display)
                     self.last_metrics_update = time.time()
@@ -181,7 +169,6 @@ class BotGUIManager(ctk.CTk):
 
                 state, confidence = self.state_machine.update_state(frame)
                 
-                # Global Timeout Kontrolü (120sn)
                 if state == BotState.BATTLE:
                     state_start_time = time.time()
                 elif state == last_state and (time.time() - state_start_time) > 120.0:
@@ -189,25 +176,20 @@ class BotGUIManager(ctk.CTk):
                     state_start_time = time.time()
                 last_state = state
 
-                # ============ ADAPTIVE ENGINE - BATTLE ============
                 if state == BotState.BATTLE:
                     mana = self.ocr.extract_mana(frame)
                     self.decision.execute_battle_logic(mana, frame)
 
-                # ============ MAIN MENU ============
                 elif state == BotState.MAIN_MENU:
                     matched, _, loc = self.vision.template_matching(frame, "battle.png", 0.70)
                     if matched:
                         self.adb.tap(loc[0], loc[1])
-                        # ============ RESET BATTLE STATE ============
                         self.decision.reset_battle_state()
                         time.sleep(2.5)
                         self.adb.tap(910, 710)
 
-                # ============ PVP MENU ============
                 elif state == BotState.PVP_MENU:
-                    steps = [("pve1.png", (910, 710)), ("pve2.png", (1543, 54)), ("pve3.png", (1546, 54)), 
-                             ("pve4.png", (1558, 41)), ("pve7.png", (836, 680)), ("pve8.png", (800, 328)), ("pve9.png", (883, 314))]
+                    steps = [("pve1.png", (910, 710)), ("pve2.png", (1543, 54)), ("pve3.png", (1546, 54)), ("pve4.png", (1558, 41)), ("pve7.png", (836, 680)), ("pve8.png", (800, 328)), ("pve9.png", (883, 314))]
                     for asset, pos in steps:
                         matched, _, _ = self.vision.template_matching(frame, asset, 0.70)
                         if matched:
@@ -215,19 +197,16 @@ class BotGUIManager(ctk.CTk):
                             time.sleep(1.5 if asset == "pve8.png" else 1.0)
                             break
 
-                # ============ BATTLE END ============
                 elif state == BotState.END:
                     matched, _, loc = self.vision.template_matching(frame, "matchend1.png", 0.65)
                     if matched:
                         self.adb.tap(loc[0], loc[1])
-                        # ============ SAVE METRICS ============
                         self.decision.save_metrics()
                         stats = self.decision.get_session_stats()
                         self.write_log(f"[SESSION] {stats['total_actions']} actions | Efficiency: {stats['overall_efficiency']:.1%}")
                     time.sleep(1.5)
                     self.adb.tap(885, 510)
 
-                # ============ AD STATE ============
                 elif state == BotState.AD:
                     matched, _, _ = self.vision.template_matching(frame, "ad7.png", 0.65)
                     if matched:
