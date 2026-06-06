@@ -1,0 +1,30 @@
+{
+  "adb_host": "127.0.0.1",
+  "adb_port": 5555,
+  "package_name": "com.my.defense",
+  "resolution": {
+    "width": 1600,
+    "height": 900
+  },
+  "ocr_mana_bounding_box": {
+    "x1": 627,
+    "y1": 757,
+    "x2": 722,
+    "y2": 790
+  },
+  "board_bounding_box": {
+    "x1": 631,
+    "y1": 529,
+    "x2": 972,
+    "y2": 734
+  },
+  "summon_button": {
+    "x": 779,
+    "y": 766
+  },
+  "upgrade_button": {
+    "x": 592,
+    "y": 840
+  },
+  "confidence_threshold": 0.70
+}
