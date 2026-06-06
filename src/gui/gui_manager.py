@@ -8,7 +8,7 @@ from src.state.state_machine import StateMachine, BotState
 from src.vision.vision_manager import VisionManager
 from src.vision.ocr_manager import OCRManager
 from src.bot.board_manager import BoardManager
-from src.bot.decision_engine import DecisionEngine
+from src.bot.adaptive_engine import AdaptiveDecisionEngine
 from src.bot.recovery_manager import RecoveryManager
 from src.utils.logger import log
 
@@ -27,12 +27,13 @@ class BotGUIManager(ctk.CTk):
         self.ocr = OCRManager(config)
         self.state_machine = StateMachine(self.vision)
         self.board = BoardManager(config, self.vision)
-        self.decision = DecisionEngine(config, self.board, self.adb)
+        self.decision = AdaptiveDecisionEngine(config, self.board, self.adb)
         self.recovery = RecoveryManager(self.adb, self.state_machine)
         
         self.bot_running = False
         self.bot_thread: threading.Thread = None
         self.consecutive_stalls = 0
+        self.last_metrics_update = time.time()
         
         self.create_widgets()
 
@@ -67,6 +68,27 @@ class BotGUIManager(ctk.CTk):
         self.lbl_state = ctk.CTkLabel(self.status_frame, text="Engine Status: IDLE / DISCONNECTED", font=("Segoe UI", 14, "bold"), text_color="#E0E1DD")
         self.lbl_state.pack(pady=12)
 
+        # ============ NEW: ADAPTIVE METRICS PANEL ============
+        self.analytics_frame = ctk.CTkFrame(self, border_width=2, border_color="#27AE60", fg_color="#1A1A1A")
+        self.analytics_frame.pack(pady=5, fill="x", padx=30)
+
+        self.lbl_analytics_title = ctk.CTkLabel(
+            self.analytics_frame, 
+            text="📊 Adaptive Metrics", 
+            font=("Segoe UI", 12, "bold"), 
+            text_color="#27AE60"
+        )
+        self.lbl_analytics_title.pack(pady=5)
+
+        self.lbl_metrics = ctk.CTkLabel(
+            self.analytics_frame,
+            text="Efficiency: 0% | Merge: 0% | Summon: 0%",
+            font=("Segoe UI", 10),
+            text_color="#E0E1DD",
+            justify="left"
+        )
+        self.lbl_metrics.pack(pady=5)
+
         self.log_label = ctk.CTkLabel(self, text="Real-time Execution Telemetry Output:", font=("Segoe UI", 11, "italic"), text_color="#8D99AE")
         self.log_label.pack(anchor="w", padx=35)
 
@@ -76,6 +98,18 @@ class BotGUIManager(ctk.CTk):
     def write_log(self, msg: str):
         self.txt_log.insert("end", msg + "\n")
         self.txt_log.see("end")
+
+    def update_metrics_display(self):
+        """Metrikleri GUI'ye yazır"""
+        if self.decision:
+            stats = self.decision.get_session_stats()
+            metric_text = (
+                f"Efficiency: {stats['overall_efficiency']:.1%} | "
+                f"Merge SR: {stats['merge_success_rate']:.1%} | "
+                f"Summon SR: {stats['summon_success_rate']:.1%} | "
+                f"Merge Delay: {stats['current_merge_delay']:.2f}s"
+            )
+            self.lbl_metrics.configure(text=metric_text)
 
     def action_connect(self):
         if self.adb.connect():
@@ -126,16 +160,24 @@ class BotGUIManager(ctk.CTk):
     def bot_loop(self):
         last_state = None
         state_start_time = time.time()
+        self.last_metrics_update = time.time()
         
         while self.bot_running:
             try:
                 frame = self.adb.take_screenshot()
                 if frame is None:
-                    time.sleep(1.0); continue
+                    time.sleep(1.0)
+                    continue
+
+                # ============ METRICS UPDATE ============
+                if time.time() - self.last_metrics_update > 5.0:
+                    self.after(0, self.update_metrics_display)
+                    self.last_metrics_update = time.time()
 
                 if self.state_machine.check_ad_coordinates_for_recovery(frame):
                     self.recovery.handle_recovery(1)
-                    time.sleep(1.0); continue
+                    time.sleep(1.0)
+                    continue
 
                 state, confidence = self.state_machine.update_state(frame)
                 
@@ -147,19 +189,22 @@ class BotGUIManager(ctk.CTk):
                     state_start_time = time.time()
                 last_state = state
 
+                # ============ ADAPTIVE ENGINE - BATTLE ============
                 if state == BotState.BATTLE:
-                    self.board.update_board(frame)
                     mana = self.ocr.extract_mana(frame)
-                    if not self.decision.execute_battle_logic(mana, frame):
-                        time.sleep(0.1) 
+                    self.decision.execute_battle_logic(mana, frame)
 
+                # ============ MAIN MENU ============
                 elif state == BotState.MAIN_MENU:
                     matched, _, loc = self.vision.template_matching(frame, "battle.png", 0.70)
                     if matched:
                         self.adb.tap(loc[0], loc[1])
+                        # ============ RESET BATTLE STATE ============
+                        self.decision.reset_battle_state()
                         time.sleep(2.5)
-                        self.adb.tap(910, 710) # Sabit pve1 konumu
+                        self.adb.tap(910, 710)
 
+                # ============ PVP MENU ============
                 elif state == BotState.PVP_MENU:
                     steps = [("pve1.png", (910, 710)), ("pve2.png", (1543, 54)), ("pve3.png", (1546, 54)), 
                              ("pve4.png", (1558, 41)), ("pve7.png", (836, 680)), ("pve8.png", (800, 328)), ("pve9.png", (883, 314))]
@@ -170,18 +215,25 @@ class BotGUIManager(ctk.CTk):
                             time.sleep(1.5 if asset == "pve8.png" else 1.0)
                             break
 
+                # ============ BATTLE END ============
                 elif state == BotState.END:
-                    # Basit matchend akışı
                     matched, _, loc = self.vision.template_matching(frame, "matchend1.png", 0.65)
-                    if matched: self.adb.tap(loc[0], loc[1])
+                    if matched:
+                        self.adb.tap(loc[0], loc[1])
+                        # ============ SAVE METRICS ============
+                        self.decision.save_metrics()
+                        stats = self.decision.get_session_stats()
+                        self.write_log(f"[SESSION] {stats['total_actions']} actions | Efficiency: {stats['overall_efficiency']:.1%}")
                     time.sleep(1.5)
-                    self.adb.tap(885, 510) # Çıkış
+                    self.adb.tap(885, 510)
 
+                # ============ AD STATE ============
                 elif state == BotState.AD:
-                    # ad7 varsa (77, 52) bas, yoksa genel rotayı izle
                     matched, _, _ = self.vision.template_matching(frame, "ad7.png", 0.65)
-                    if matched: self.adb.tap(77, 52)
-                    else: self.adb.tap(1550, 50)
+                    if matched:
+                        self.adb.tap(77, 52)
+                    else:
+                        self.adb.tap(1550, 50)
                     time.sleep(2.0)
 
                 time.sleep(0.2)
